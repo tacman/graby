@@ -28,7 +28,8 @@ class ContentExtractor
     private ?string $language = null;
     /** @var string[] */
     private array $authors = [];
-    private ?\DOMElement $body = null;
+    /** @var \DOMElement|\DOMNode|null */
+    private $body = null;
     private ?string $image = null;
     private bool $nativeAd = false;
     private ?string $date = null;
@@ -41,10 +42,7 @@ class ContentExtractor
      * @param array{
      *   default_parser?: string,
      *   fingerprints?: array<string, string>,
-     *   config_builder?: array{
-     *     site_config?: string[],
-     *     hostname_regex?: string,
-     *   },
+     *   config_builder?: array,
      *   readability?: array{
      *     pre_filters?: array<string, string>,
      *     post_filters?: array<string, string>,
@@ -499,7 +497,7 @@ class ContentExtractor
             $this->logger->info('Detecting body');
             $this->body = $this->readability->getContent();
 
-            if (1 === $this->body->childNodes->length && $this->body->firstChild instanceof \DOMElement) {
+            if (1 === $this->body->childNodes->length && \XML_ELEMENT_NODE === $this->body->firstChild->nodeType) {
                 $this->body = $this->body->firstChild;
             }
 
@@ -516,11 +514,11 @@ class ContentExtractor
             if (isset($this->title) && '' !== $this->title && null !== $this->body->firstChild) {
                 $firstChild = $this->body->firstChild;
 
-                while (null !== $firstChild->nextSibling && !$firstChild instanceof \DOMElement) {
+                while (null !== $firstChild->nextSibling && $firstChild->nodeType && (\XML_ELEMENT_NODE !== $firstChild->nodeType)) {
                     $firstChild = $firstChild->nextSibling;
                 }
 
-                if ($firstChild instanceof \DOMElement
+                if (\XML_ELEMENT_NODE === $firstChild->nodeType
                     && \in_array(strtolower($firstChild->tagName), ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], true)
                     && (strtolower(trim($firstChild->textContent)) === strtolower(trim($this->title)))) {
                     $this->body->removeChild($firstChild);
@@ -647,7 +645,10 @@ class ContentExtractor
         return $html;
     }
 
-    public function getContent(): ?\DOMElement
+    /**
+     * @return \DOMElement|\DOMNode|null
+     */
+    public function getContent()
     {
         return $this->body;
     }
@@ -886,7 +887,7 @@ class ContentExtractor
      *
      * @return bool Telling if we have to detect title again or not
      */
-    private function extractTitle(bool $detectTitle, string $cssClass, ?\DOMNode $node, string $logMessage): bool
+    private function extractTitle(bool $detectTitle, string $cssClass, ?\DOMNode $node = null, ?string $logMessage=null): bool
     {
         if (null === $node) {
             return true;
@@ -910,7 +911,7 @@ class ContentExtractor
      *
      * @return bool Telling if we have to detect date again or not
      */
-    private function extractDate(bool $detectDate, string $cssClass, ?\DOMNode $node, string $logMessage): bool
+    private function extractDate(bool $detectDate, string $cssClass, ?\DOMNode $node = null, ?string $logMessage=null): bool
     {
         if (null === $node) {
             return true;
@@ -933,7 +934,7 @@ class ContentExtractor
      *
      * @return bool Telling if we have to detect author again or not
      */
-    private function extractAuthor(bool $detectAuthor, ?\DOMNode $node): bool
+    private function extractAuthor(bool $detectAuthor, ?\DOMNode $node = null): bool
     {
         if (false === $detectAuthor || !$this->xpath) {
             return false;
@@ -981,7 +982,7 @@ class ContentExtractor
      *
      * @return bool Telling if we have to detect body again or not
      */
-    private function extractBody(bool $detectBody, string $xpathExpression, ?\DOMNode $node, string $type): bool
+    private function extractBody(bool $detectBody, string $xpathExpression, ?\DOMNode $node = null, ?string $type=null): bool
     {
         if (false === $detectBody || !$this->xpath) {
             return false;
@@ -1001,9 +1002,9 @@ class ContentExtractor
         $this->logger->info($type . ': found "' . $elems->length . '" with ' . $xpathExpression);
 
         if (1 === $elems->length) {
-            // body can't be anything other than element
-            if (!$elems->item(0) instanceof \DOMElement) {
-                $this->logger->info('Body must be an element');
+            // body can't be an attribute
+            if ($elems->item(0) instanceof \DOMAttr) {
+                $this->logger->info('Body can not be an attribute');
 
                 return true;
             }
@@ -1317,8 +1318,6 @@ class ContentExtractor
 
     /**
      * Clean extract of JSON-LD authors.
-     *
-     * @param array<mixed> $authors
      *
      * @return string[]
      */
