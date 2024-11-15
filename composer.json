@@ -1,9 +1,13 @@
 {
-    "name": "j0k3r/graby",
-    "description": "Graby helps you extract article content from web pages",
+    "name": "tacman/graby",
+    "description": "Graby helps you extract article content from web pages, fork of j0k3r/graby",
     "type": "library",
     "license": "MIT",
     "authors": [{
+        "name": "Tac Tacelosky",
+        "email": "tacman@gmail.com",
+        "role": "Update dependencies, drop EOL"
+    },{
         "name": "Jeremy Benoist",
         "email": "jeremy.benoist@gmail.com",
         "role": "Developer"
@@ -15,7 +19,7 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "require": {
-        "php": ">=7.4",
+        "php": "^8.2",
         "ext-curl": "*",
         "ext-tidy": "*",
         "fossar/htmlawed": "^1.3.3",
