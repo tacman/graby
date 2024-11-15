@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Graby\Monolog\Formatter;
 
 use Monolog\Formatter\HtmlFormatter;
+use Monolog\LogRecord;
 
 /**
  * Formats incoming records into an HTML table.
@@ -15,6 +16,7 @@ use Monolog\Formatter\HtmlFormatter;
  */
 class GrabyFormatter extends HtmlFormatter
 {
+    private array $logLevels=[];
     /**
      * Formats a log record.
      *
@@ -31,7 +33,7 @@ class GrabyFormatter extends HtmlFormatter
      *
      * @return string The formatted record
      */
-    public function format(array $record): string
+    public function format(LogRecord $record): string
     {
         $output = '<table cellspacing="1" width="100%" class="monolog-output">';
 
