@@ -43,7 +43,7 @@ class GrabyFormatter extends HtmlFormatter
         if ($record['context']) {
             $embeddedTable = '<table cellspacing="1" width="100%">';
             foreach ($record['context'] as $key => $value) {
-                $embeddedTable .= $this->addRowWithLevel($record['level'], $key, $this->convertToString($value));
+                $embeddedTable .= $this->addRowWithLevel($record['level'], (string)$key, $this->convertToString($value));
             }
             $embeddedTable .= '</table>';
             $output .= $this->addRowWithLevel($record['level'], 'Context', $embeddedTable, false);
@@ -80,13 +80,19 @@ class GrabyFormatter extends HtmlFormatter
      * @param string $td       Row standard cell content
      * @param bool   $escapeTd false if td content must not be html escaped
      */
-    private function addRowWithLevel(int $level, string $th, string $td = ' ', bool $escapeTd = true): string
+    private function addRowWithLevel(string|int $level, string $th, string $td = ' ', bool $escapeTd = true): string
     {
+        $level = (int)$level;
         $th = htmlspecialchars($th, \ENT_NOQUOTES, 'UTF-8');
         if ($escapeTd) {
             $td = '<pre>' . htmlspecialchars($td, \ENT_NOQUOTES, 'UTF-8') . '</pre>';
         }
+        if (!array_key_exists($level, $this->logLevels)) {
+            $this->logLevels[$level] = $level; // style?
+        }
+//        dd($level, $this->logLevels);
 
-        return "<tr style=\"padding: 4px;spacing: 0;text-align: left;\">\n<th style=\"background:" . $this->logLevels[$level] . "\" width=\"100px\">$th:</th>\n<td style=\"padding: 4px;spacing: 0;text-align: left;background: #eeeeee\">" . $td . "</td>\n</tr>";
+        return "<tr style=\"padding: 4px;spacing: 0;text-align: left;\">\n<th style=\"background:" .
+        $this->logLevels[$level] . "\" width=\"100px\">$th:</th>\n<td style=\"padding: 4px;spacing: 0;text-align: left;background: #eeeeee\">" . $td . "</td>\n</tr>";
     }
 }
