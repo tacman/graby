@@ -1083,6 +1083,8 @@ class ContentExtractor
             $readability->addPostFilter($filter, $replacer);
         }
 
+        $readability->init();
+
         return $readability;
     }
 
