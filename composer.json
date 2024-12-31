@@ -38,7 +38,7 @@
         "symfony/options-resolver": "^6.4|^7.0",
         "symfony/polyfill-intl-idn": "^1.26",
         "symfony/polyfill-php80": "^1.27",
-        "tacman/php-readability": "^2.0"
+        "tacman/php-readability": "*"
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.0",
