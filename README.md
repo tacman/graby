@@ -1,3 +1,7 @@
+composer config repositories.graby '{"type": "path", "url": "~/g/tacman/graby"}'
+composer req tacman/graby:"*@dev"
+
+
 <div align="center">
     <br>
     <img width="400" height="144" src="https://user-images.githubusercontent.com/62333/67490348-5dfc5280-f673-11e9-9b3d-584e6cbeb9e2.png" alt="Graby logo" />
@@ -45,7 +49,7 @@ That's why I made this fork:
 
 ### Requirements
 
-- PHP >= 7.4
+- PHP >= 8.2
 - [Tidy](https://github.com/htacg/tidy-html5) & cURL extensions enabled
 
 ### Installation
