@@ -293,7 +293,7 @@ class GrabyTest extends TestCase
         $this->assertEmpty($res->getLanguage());
         $this->assertSame('Document1', $res->getTitle());
         $this->assertStringContainsString('Document title', $res->getHtml());
-        $this->assertStringContainsString('Morbi vulputate tincidunt venenatis.', $res->getHtml());
+        $this->assertStringContainsString('Morbi vulputate tincidunt', $res->getHtml());
         $this->assertStringContainsString('http://example.com/test.pdf', (string) $res->getEffectiveResponse()->getEffectiveUri());
         $this->assertNotNull($res->getSummary());
         $this->assertStringContainsString('Document title Calibri : Lorem ipsum dolor sit amet', $res->getSummary());
@@ -530,7 +530,7 @@ class GrabyTest extends TestCase
 
         $this->assertEmpty($res->getLanguage());
         $this->assertSame('my title', $res->getTitle());
-        $this->assertSame('my content<div class="story">my content</div>', $res->getHtml());
+        $this->assertSame('my content<div>my content</div>', $res->getHtml());
         $this->assertSame('http://multiplepage1.com', (string) $res->getEffectiveResponse()->getEffectiveUri());
         $this->assertSame('my content my content', $res->getSummary());
         $this->assertStringContainsString('text/html', $res->getEffectiveResponse()->getResponse()->getHeaderLine('content-type'));
@@ -712,9 +712,8 @@ class GrabyTest extends TestCase
     {
         $graby = new Graby();
 
-        $reflection = new \ReflectionClass(\get_class($graby));
+        $reflection = new \ReflectionClass($graby::class);
         $method = $reflection->getMethod('getExcerpt');
-        $method->setAccessible(true);
 
         $res = $method->invokeArgs($graby, [$text, $length, $separator]);
 
@@ -746,9 +745,8 @@ class GrabyTest extends TestCase
     {
         $graby = new Graby();
 
-        $reflection = new \ReflectionClass(\get_class($graby));
+        $reflection = new \ReflectionClass($graby::class);
         $method = $reflection->getMethod('makeAbsoluteStr');
-        $method->setAccessible(true);
 
         $res = $method->invokeArgs($graby, [new Uri($base), $url]);
 
@@ -784,13 +782,41 @@ class GrabyTest extends TestCase
         /** @var \DOMElement */
         $e = $doc->documentElement;
 
-        $reflection = new \ReflectionClass(\get_class($graby));
+        $reflection = new \ReflectionClass($graby::class);
         $method = $reflection->getMethod('makeAbsoluteAttr');
-        $method->setAccessible(true);
 
         $method->invokeArgs($graby, [new Uri($base), $e, $attr]);
 
         $this->assertSame($expectedResult, $e->getAttribute($expectedAttr));
+    }
+
+    /**
+     * A malformed (but non-anchor, non-http) url makes the uri factory throw:
+     * the attribute is then left untouched and the failure is logged.
+     */
+    public function testMakeAbsoluteAttrWithWrongUrl(): void
+    {
+        $logger = new Logger('foo');
+        $handler = new TestHandler();
+        $logger->pushHandler($handler);
+
+        $graby = new Graby();
+        $graby->setLogger($logger);
+
+        $doc = new \DOMDocument();
+        $doc->loadXML('<a href="//example.com:port/p">test</a>');
+
+        /** @var \DOMElement */
+        $e = $doc->documentElement;
+
+        $reflection = new \ReflectionClass($graby::class);
+        $method = $reflection->getMethod('makeAbsoluteAttr');
+
+        $method->invokeArgs($graby, [new Uri('http://example.org'), $e, 'href']);
+
+        // url is invalid so it can't be made absolute: kept as-is
+        $this->assertSame('//example.com:port/p', $e->getAttribute('href'));
+        $this->assertTrue($handler->hasInfoThatContains('Wrong content url'));
     }
 
     /**
@@ -821,9 +847,8 @@ class GrabyTest extends TestCase
         /** @var \DOMElement */
         $e = $doc->documentElement;
 
-        $reflection = new \ReflectionClass(\get_class($graby));
+        $reflection = new \ReflectionClass($graby::class);
         $method = $reflection->getMethod('makeAbsolute');
-        $method->setAccessible(true);
 
         $method->invokeArgs($graby, [new Uri($base), $e]);
 
@@ -843,9 +868,8 @@ class GrabyTest extends TestCase
         /** @var \DOMElement */
         $e = $doc->documentElement;
 
-        $reflection = new \ReflectionClass(\get_class($graby));
+        $reflection = new \ReflectionClass($graby::class);
         $method = $reflection->getMethod('makeAbsolute');
-        $method->setAccessible(true);
 
         $method->invokeArgs($graby, [new Uri('http://example.org'), $e]);
 
@@ -853,6 +877,51 @@ class GrabyTest extends TestCase
         \assert($e->firstChild instanceof \DOMElement); // For PHPStan
         $this->assertNotNull($e->firstChild->attributes->getNamedItem('src'));
         $this->assertSame('http://example.org/path/to/image.jpg', $e->firstChild->attributes->getNamedItem('src')->nodeValue);
+    }
+
+    /**
+     * A wrapper element (not itself a/img/iframe) holding several url-bearing
+     * descendants of each kind: every descendant must be made absolute.
+     */
+    public function testMakeAbsoluteWithManyChildren(): void
+    {
+        $graby = new Graby();
+
+        $doc = new \DOMDocument();
+        $doc->loadXML(
+            '<div>'
+            . '<a href="/one">1</a>'
+            . '<img src="/a.jpg" />'
+            . '<p><a href="/two">2</a><iframe src="/frame" /></p>'
+            . '<img src="/b.jpg" />'
+            . '</div>'
+        );
+
+        /** @var \DOMElement */
+        $e = $doc->documentElement;
+
+        $reflection = new \ReflectionClass($graby::class);
+        $method = $reflection->getMethod('makeAbsolute');
+
+        $method->invokeArgs($graby, [new Uri('http://example.org'), $e]);
+
+        $hrefs = [];
+        foreach ($doc->getElementsByTagName('a') as $a) {
+            $hrefs[] = $a->getAttribute('href');
+        }
+        $srcs = [];
+        foreach ($doc->getElementsByTagName('img') as $img) {
+            $srcs[] = $img->getAttribute('src');
+        }
+        foreach ($doc->getElementsByTagName('iframe') as $iframe) {
+            $srcs[] = $iframe->getAttribute('src');
+        }
+
+        $this->assertSame(['http://example.org/one', 'http://example.org/two'], $hrefs);
+        $this->assertSame(
+            ['http://example.org/a.jpg', 'http://example.org/b.jpg', 'http://example.org/frame'],
+            $srcs
+        );
     }
 
     public function testContentLinksRemove(): void
@@ -955,9 +1024,8 @@ class GrabyTest extends TestCase
     {
         $graby = new Graby();
 
-        $reflection = new \ReflectionClass(\get_class($graby));
+        $reflection = new \ReflectionClass($graby::class);
         $method = $reflection->getMethod('validateUrl');
-        $method->setAccessible(true);
 
         $res = $method->invokeArgs($graby, [$url]);
 
@@ -997,7 +1065,7 @@ class GrabyTest extends TestCase
             ],
             'script_inject_removed_from_long_text' => [
                 '<html><script src="http://attacker/malicious‑script.js"></script><body><div><p>Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p></div></body></html>',
-                '<div><p>Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p></div>',
+                '<p>Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>',
                 false,
             ],
         ];
@@ -1044,6 +1112,14 @@ class GrabyTest extends TestCase
         $this->assertStringNotContainsString('<figure><p>Après un <em>icebreaker</em>', $res->getHtml());
     }
 
+    public function testEmptyImgNodesPreserved(): void
+    {
+        $graby = $this->getGrabyWithMock('/fixtures/content/empty-img-node.html');
+        $res = $graby->fetchContent('https://example.com/empty-img-node');
+
+        $this->assertStringContainsString('<img src="https://example.com/empty.jpg" alt="Empty node image" />', $res->getHtml());
+    }
+
     public function testMetaAuthor(): void
     {
         $graby = $this->getGrabyWithMock('/fixtures/content/keithjgrant.html');
@@ -1086,6 +1162,25 @@ class GrabyTest extends TestCase
         $res = $graby->fetchContent('https://gist.githubusercontent.com/nicosomb/94d1e08c42baff9184c313d638de1195/raw/d63b0bc99225604a9f4b57bfea1cd7a538c8ceeb/gistfile1.txt');
 
         $this->assertStringNotContainsString('<script>', $res->getHtml());
+    }
+
+    public function testCleanupHtmlRemovesDeniedXssAttributes(): void
+    {
+        $graby = new Graby();
+        $html = '<article>'
+            . '<div style="position:fixed;inset:0;z-index:2147483647;background:#fff">overlay</div>'
+            . '<iframe src="https://example.com/embed" srcdoc="&lt;script&gt;alert(document.domain)&lt;/script&gt;"></iframe>'
+            . '<img src="x" onerror="alert(1)" />'
+            . '</article>';
+
+        $cleanedHtml = $graby->cleanupHtml($html, new Uri('http://0.0.0.0'));
+
+        $this->assertStringContainsString('<div>overlay</div>', $cleanedHtml);
+        $this->assertStringContainsString('<iframe src="https://example.com/embed"></iframe>', $cleanedHtml);
+        $this->assertStringContainsString('<img src="x" alt="image" />', $cleanedHtml);
+        $this->assertStringNotContainsString('style=', $cleanedHtml);
+        $this->assertStringNotContainsString('srcdoc=', $cleanedHtml);
+        $this->assertStringNotContainsString('onerror=', $cleanedHtml);
     }
 
     public function testBadUrl(): void

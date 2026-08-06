@@ -11,22 +11,11 @@ use Psr\Log\NullLogger;
 
 class ConfigBuilder
 {
-    private LoggerInterface $logger;
-    private ConfigBuilderConfig $config;
+    private readonly ConfigBuilderConfig $config;
     /** @var array<string, string> */
     private array $configFiles = [];
     /** @var array<string, SiteConfig> */
     private array $cache = [];
-
-    /**
-     * @var string[] Array for accepted headers for http_header()
-     */
-    private array $acceptedHeaders = [
-        'user-agent',
-        'referer',
-        'cookie',
-        'accept',
-    ];
 
     /**
      * @var string[] Array of accepted HTML tags for wrap_in()
@@ -43,11 +32,11 @@ class ConfigBuilder
      *   hostname_regex?: string,
      * } $config
      */
-    public function __construct(array $config = [], ?LoggerInterface $logger = null)
-    {
+    public function __construct(
+        array $config = [],
+        private ?LoggerInterface $logger = new NullLogger(),
+    ) {
         $this->config = new ConfigBuilderConfig($config);
-
-        $this->logger = $logger ?? new NullLogger();
 
         $this->loadConfigFiles();
     }
@@ -77,12 +66,7 @@ class ConfigBuilder
      */
     public function addToCache(string $key, SiteConfig $config): void
     {
-        $key = strtolower($key);
-        if (str_starts_with($key, 'www.')) {
-            $key = substr($key, 4);
-            // For PHPStan on PHP < 8.0: it cannot fail since the prefix checked above has four characters.
-            \assert(false !== $key);
-        }
+        $key = $this->makeHostKey($key);
 
         if ($config->cache_key) {
             $key = $config->cache_key;
@@ -101,12 +85,7 @@ class ConfigBuilder
      */
     public function getCachedVersion(string $key): ?SiteConfig
     {
-        $key = strtolower($key);
-        if (str_starts_with($key, 'www.')) {
-            $key = substr($key, 4);
-            // For PHPStan on PHP < 8.0: it cannot fail since the prefix checked above has four characters.
-            \assert(false !== $key);
-        }
+        $key = $this->makeHostKey($key);
 
         if (\array_key_exists($key, $this->cache)) {
             return $this->cache[$key];
@@ -140,12 +119,7 @@ class ConfigBuilder
      */
     public function buildForHost(string $host, bool $addToCache = true): SiteConfig
     {
-        $host = strtolower($host);
-        if (str_starts_with($host, 'www.')) {
-            $host = substr($host, 4);
-            // For PHPStan on PHP < 8.0: it cannot fail since the prefix checked above has four characters.
-            \assert(false !== $host);
-        }
+        $host = $this->makeHostKey($host);
 
         // is merged version already cached?
         $cachedSiteConfig = $this->getCachedVersion($host . '.merged');
@@ -195,10 +169,7 @@ class ConfigBuilder
      */
     public function loadSiteConfig(string $host, bool $exactHostMatch = false): ?SiteConfig
     {
-        $host = strtolower($host);
-        if (str_starts_with($host, 'www.')) {
-            $host = substr($host, 4);
-        }
+        $host = $this->makeHostKey($host);
 
         if (!$host || (\strlen($host) > 200) || !preg_match($this->config->getHostnameRegex(), ltrim($host, '.'))) {
             return null;
@@ -235,7 +206,7 @@ class ConfigBuilder
 
                 $configLines = file($this->configFiles[$host . '.txt'], \FILE_IGNORE_NEW_LINES | \FILE_SKIP_EMPTY_LINES);
                 // no lines ? we don't found config then
-                if (empty($configLines) || !\is_array($configLines)) {
+                if (false === $configLines || 0 === \count($configLines)) {
                     return null;
                 }
 
@@ -269,7 +240,7 @@ class ConfigBuilder
     public function mergeConfig(SiteConfig $currentConfig, SiteConfig $newConfig): SiteConfig
     {
         // check for commands where we accept multiple statements (no test_url)
-        foreach (['title', 'body', 'strip', 'strip_id_or_class', 'strip_image_src', 'single_page_link', 'next_page_link', 'date', 'author'] as $var) {
+        foreach (['title', 'body', 'strip', 'strip_id_or_class', 'strip_image_src', 'single_page_link', 'next_page_link', 'date', 'author', 'post_strip_attr'] as $var) {
             // append array elements for this config variable from $newConfig to this config
             $currentConfig->$var = array_unique(array_merge($currentConfig->$var, $newConfig->$var));
         }
@@ -355,7 +326,7 @@ class ConfigBuilder
                 $command = 'strip';
             }
 
-            if (\in_array($command, ['title', 'body', 'strip', 'strip_id_or_class', 'strip_image_src', 'single_page_link', 'next_page_link', 'test_url', 'find_string', 'replace_string', 'login_extra_fields', 'native_ad_clue', 'date', 'author'], true)) {
+            if (\in_array($command, ['title', 'body', 'strip', 'strip_id_or_class', 'strip_image_src', 'single_page_link', 'next_page_link', 'test_url', 'find_string', 'replace_string', 'login_extra_fields', 'native_ad_clue', 'date', 'author', 'post_strip_attr'], true)) {
                 // check for commands where we accept multiple statements
                 $config->$command[] = $val;
             } elseif (\in_array($command, ['tidy', 'prune', 'autodetect_on_failure', 'requires_login', 'skip_json_ld'], true)) {
@@ -368,7 +339,7 @@ class ConfigBuilder
                 // check for replace_string(find): replace
                 $config->find_string[] = $match[2];
                 $config->replace_string[] = $val;
-            } elseif (str_ends_with($command, ')') && preg_match('!^([a-z0-9_]+)\(([a-z0-9_-]+)\)$!i', $command, $match) && 'http_header' === $match[1] && \in_array(strtolower($match[2]), $this->acceptedHeaders, true)) {
+            } elseif (str_ends_with($command, ')') && preg_match('!^([a-z0-9_]+)\(([a-z0-9_-]+)\)$!i', $command, $match) && 'http_header' === $match[1]) {
                 $config->http_header[strtolower(trim($match[2]))] = $val;
             } elseif (\in_array($command, ['if_page_contains'], true)) {
                 // special treatment for if_page_contains
@@ -415,5 +386,18 @@ class ConfigBuilder
 
             $config->if_page_contains[$rule][$key] = (string) $condition;
         }
+    }
+
+    /**
+     * Normalizes hostname by converting it to lowercase and removing `www.` prefix, if present.
+     */
+    private function makeHostKey(string $host): string
+    {
+        $host = strtolower($host);
+        if (str_starts_with($host, 'www.')) {
+            $host = substr($host, 4);
+        }
+
+        return $host;
     }
 }

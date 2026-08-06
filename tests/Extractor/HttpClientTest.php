@@ -313,9 +313,9 @@ class HttpClientTest extends TestCase
             $httpMockClient->addResponse(new Response(
                 308,
                 [
-                    'Location' => 'http://fr.wikipedia.org/wiki/Copyright?' . random_int(0, mt_getrandmax()),
+                    'Location' => 'http://fr.wikipedia.org/wiki/Copyright?' . random_int(0, getrandmax()),
                 ],
-                '<meta HTTP-EQUIV="REFRESH" content="0; url=http://fr.wikipedia.org/wiki/Copyright?' . random_int(0, mt_getrandmax()) . '">'
+                '<meta HTTP-EQUIV="REFRESH" content="0; url=http://fr.wikipedia.org/wiki/Copyright?' . random_int(0, getrandmax()) . '">'
             ));
         }
 
@@ -648,6 +648,27 @@ class HttpClientTest extends TestCase
         }
     }
 
+    public function testCustomHttpHeaders(): void
+    {
+        $url = 'http://example.com/foo';
+        $httpMockClient = new HttpMockClient();
+        $httpMockClient->addResponse(new Response(200, [], ''));
+
+        $http = new HttpClient($httpMockClient);
+        $http->fetch(new Uri($url), false, [
+            'Accept-Language' => 'fr,en-US;q=0.9,en;q=0.8',
+            'X-Custom-Header' => 'custom value',
+            'x-empty-header' => '',
+        ]);
+
+        /** @var RequestInterface $request */
+        $request = $httpMockClient->getRequests()[0];
+
+        $this->assertSame('fr,en-US;q=0.9,en;q=0.8', $request->getHeaderLine('Accept-Language'));
+        $this->assertSame('custom value', $request->getHeaderLine('X-Custom-Header'));
+        $this->assertFalse($request->hasHeader('X-Empty-Header'));
+    }
+
     /**
      * @return iterable<array{url: string, expectedUrl: string}>
      */
@@ -664,6 +685,10 @@ class HttpClientTest extends TestCase
             ],
             [
                 'url' => 'https://example.com/foo?utm_content=111315005',
+                'expectedUrl' => 'https://example.com/foo',
+            ],
+            [
+                'url' => 'https://example.com/foo?mtm_campaign=feed',
                 'expectedUrl' => 'https://example.com/foo',
             ],
         ];

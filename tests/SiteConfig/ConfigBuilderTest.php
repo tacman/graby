@@ -13,11 +13,12 @@ use PHPUnit\Framework\TestCase;
 
 class ConfigBuilderTest extends TestCase
 {
+    /**
+     * @doesNotPerformAssertions
+     */
     public function testConstructDefault(): void
     {
         $builder = new ConfigBuilder(['site_config' => [__DIR__]]);
-
-        $this->assertInstanceOf(ConfigBuilder::class, $builder);
     }
 
     public function testBuildFromArrayNoLines(): void
@@ -44,8 +45,11 @@ class ConfigBuilderTest extends TestCase
             'http_header(user-agent): my-user-agent',
             'http_header(referer): http://idontl.ie',
             'http_header(Cookie): GDPR_consent=1',
+            'http_header(accept-language): fr,en-US;q=0.9,en;q=0.8',
+            'http_header(x-custom-header): custom value',
             'strip_attr: @class',
             'strip_attr: @style',
+            'post_strip_attr: //a/@target',
             'single_page_link: //canonical',
             'if_page_contains: //div/article/header',
         ]);
@@ -61,9 +65,12 @@ class ConfigBuilderTest extends TestCase
             'user-agent' => 'my-user-agent',
             'referer' => 'http://idontl.ie',
             'cookie' => 'GDPR_consent=1',
+            'accept-language' => 'fr,en-US;q=0.9,en;q=0.8',
+            'x-custom-header' => 'custom value',
         ];
         $configExpected->date = ['foo'];
         $configExpected->strip = ['@class', '@style'];
+        $configExpected->post_strip_attr = ['//a/@target'];
         $configExpected->single_page_link = ['//canonical'];
         $configExpected->if_page_contains = [
             'single_page_link' => [
@@ -153,14 +160,11 @@ class ConfigBuilderTest extends TestCase
         $configBuilder = new ConfigBuilder(['site_config' => [__DIR__]]);
         $config1 = $configBuilder->buildForHost('www.host.io');
 
-        $this->assertInstanceOf(SiteConfig::class, $config1);
-
         $this->assertSame($config1, $configBuilder->getCachedVersion('host.io'));
         $this->assertSame($config1, $configBuilder->getCachedVersion('host.io.merged'));
 
         $config2 = $configBuilder->buildForHost('host.io');
 
-        $this->assertInstanceOf(SiteConfig::class, $config2);
         $this->assertSame($config1, $config2);
     }
 
@@ -223,7 +227,7 @@ class ConfigBuilderTest extends TestCase
 
         $res2 = $configBuilder->loadSiteConfig('fr.wikipedia.org');
 
-        $this->assertInstanceOf(SiteConfig::class, $res);
+        $this->assertInstanceOf(SiteConfig::class, $res2);
         $this->assertSame($res, $res2, 'Config retrieve from cache');
     }
 
@@ -239,8 +243,6 @@ class ConfigBuilderTest extends TestCase
         $configBuilder->setLogger($logger);
 
         $res = $configBuilder->buildFromUrl(new Uri('https://fr.wikipedia.org/wiki/Wikip%C3%A9dia:Accueil_principal'));
-
-        $this->assertInstanceOf(SiteConfig::class, $res);
 
         $records = $handler->getRecords();
 
@@ -264,16 +266,19 @@ class ConfigBuilderTest extends TestCase
         $config1 = new SiteConfig();
         $config1->find_string = ['toto'];
         $config1->replace_string = ['titi'];
+        $config1->post_strip_attr = ['//a/@target'];
 
         $config2 = new SiteConfig();
         $config2->find_string = ['papa'];
         $config2->replace_string = ['popo'];
+        $config2->post_strip_attr = ['//a/@target', '//img/@srcset'];
 
         $config3 = $configBuilder->mergeConfig($config1, $config2);
         $config4 = $configBuilder->mergeConfig($config3, $config2);
 
         $this->assertCount(2, $config4->find_string);
         $this->assertCount(2, $config4->replace_string);
+        $this->assertSame(['//a/@target', '//img/@srcset'], $config4->post_strip_attr);
     }
 
     public function testCleanupFindReplaceString(): void

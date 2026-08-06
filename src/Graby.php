@@ -37,14 +37,14 @@ use Smalot\PdfParser\Parser as PdfParser;
 class Graby
 {
     private LoggerInterface $logger;
-    private GrabyConfig $config;
-    private HttpClient $httpClient;
-    private ContentExtractor $extractor;
-    private ConfigBuilder $configBuilder;
-    private UriFactoryInterface $uriFactory;
+    private readonly GrabyConfig $config;
+    private readonly HttpClient $httpClient;
+    private readonly ContentExtractor $extractor;
+    private readonly ConfigBuilder $configBuilder;
+    private readonly UriFactoryInterface $uriFactory;
     private bool $imgNoReferrer = false;
-    private ResponseFactoryInterface $responseFactory;
-    private StreamFactoryInterface $streamFactory;
+    private readonly ResponseFactoryInterface $responseFactory;
+    private readonly StreamFactoryInterface $streamFactory;
 
     private ?string $prefetchedContent = null;
 
@@ -99,7 +99,7 @@ class Graby
         if ($this->config->getDebug()) {
             $this->logger = new Logger('graby');
 
-            // This statement has to be before Logger::INFO to catch all DEBUG messages
+            // This statement has to be before Level::Info to catch all DEBUG messages
             if ('debug' === $this->config->getLogLevel()) {
                 $fp = fopen(__DIR__ . '/../log/html.log', 'w');
                 if (false !== $fp) {
@@ -190,17 +190,23 @@ class Graby
     /**
      * Cleanup HTML from a DOMElement or a string.
      *
-     * @param string|\DOMElement $contentBlock
+     * @param string|\DOMElement $contentBlock a DOM element or UTF-8-encoded HTML fragment
      */
     public function cleanupHtml($contentBlock, UriInterface $url): string
     {
+        $readability = null;
         $originalContentBlock = \is_string($contentBlock) ? $contentBlock : $contentBlock->textContent;
 
         // if content is pure html, convert it
         if (\is_string($contentBlock)) {
-            $this->extractor->process($contentBlock, $url);
+            $result = $this->extractor->process($contentBlock, $url);
 
-            $contentBlock = $this->extractor->getContent();
+            $contentBlock = $result->content;
+            $readability = $result->readability;
+        } else {
+            // because we still need to retrieve readability for later cleanup
+            $result = $this->extractor->process($contentBlock->textContent, $url);
+            $readability = $result->readability;
         }
 
         // in case of extractor failed
@@ -210,17 +216,15 @@ class Graby
             return trim($this->cleanupXss($originalContentBlock));
         }
 
-        if ($this->extractor->readability) {
-            $this->extractor->readability->clean($contentBlock, 'select');
-        }
+        $readability->clean($contentBlock, 'select');
 
         if ($this->config->getRewriteRelativeUrls()) {
             $this->makeAbsolute($url, $contentBlock);
         }
 
         // footnotes
-        if ('footnotes' === $this->config->getContentLinks() && !str_contains($url->getHost(), 'wikipedia.org') && $this->extractor->readability) {
-            $this->extractor->readability->addFootnotes($contentBlock);
+        if ('footnotes' === $this->config->getContentLinks() && !str_contains($url->getHost(), 'wikipedia.org') && $readability) {
+            $readability->addFootnotes($contentBlock);
         }
 
         $contentBlock->normalize();
@@ -315,8 +319,8 @@ class Graby
         $re = '/^[ \t]*[\r\n]+/m';
         $htmlCleaned = preg_replace($re, '', $html);
 
-        // Remove empty nodes (except iframe, td and th)
-        $re = '/<(?!iframe|td|th)([^>\s]+)[^>]*>(?:<br \/>|&nbsp;|&thinsp;|&ensp;|&emsp;|&#8201;|&#8194;|&#8195;|\s)*<\/\1>/m';
+        // Remove empty nodes (except audio, iframe, img, td and th)
+        $re = '/<(?!audio|iframe|img|td|th)([^>\s]+)[^>]*>(?:<br \/>|&nbsp;|&thinsp;|&ensp;|&emsp;|&#8201;|&#8194;|&#8195;|\s)*<\/\1>/m';
         $html = preg_replace($re, '', (string) $htmlCleaned);
 
         // in case html string is too long, keep the html uncleaned to avoid empty html
@@ -348,15 +352,14 @@ class Graby
 
         $this->logger->info('Attempting to extract content');
 
-        $extractResult = $this->extractor->process($html, $effectiveUrl);
-        /** @var Readability */
-        $readability = $this->extractor->readability;
-        $contentBlock = $this->extractor->getContent();
-        $extractedTitle = $this->extractor->getTitle();
-        $extractedLanguage = $this->extractor->getLanguage();
-        $extractedDate = $this->extractor->getDate();
-        $extractedAuthors = $this->extractor->getAuthors();
-        $extractedImage = $this->extractor->getImage();
+        $extractedContent = $this->extractor->process($html, $effectiveUrl);
+        $readability = $extractedContent->readability;
+        $contentBlock = $extractedContent->content;
+        $extractedTitle = $extractedContent->title;
+        $extractedLanguage = $extractedContent->language;
+        $extractedDate = $extractedContent->date;
+        $extractedAuthors = $extractedContent->authors;
+        $extractedImage = $extractedContent->image;
 
         // ensure image is absolute
         if (null !== $extractedImage) {
@@ -370,7 +373,7 @@ class Graby
         }
 
         // Deal with multi-page articles
-        $isMultiPage = (!$isSinglePage && $extractResult && null !== $this->extractor->getNextPageUrl());
+        $isMultiPage = (!$isSinglePage && $extractedContent->isSuccess && null !== $extractedContent->nextPageUrl);
         if ($this->config->getMultipage() && null === $this->prefetchedContent && $isMultiPage) {
             $this->logger->info('Attempting to process multi-page article');
             // store first page to avoid parsing it again (previous url content is in `$contentBlock`)
@@ -379,7 +382,8 @@ class Graby
             ];
             $multiPageContent = [];
 
-            while ($nextPageUrl = $this->extractor->getNextPageUrl()) {
+            $nextPageUrl = $extractedContent->nextPageUrl;
+            while ($nextPageUrl) {
                 $this->logger->info('Processing next page: {url}', ['url' => (string) $nextPageUrl]);
                 // If we've got URL, resolve against $url
                 $nextPageUrl = $this->makeAbsoluteStr($effectiveUrl, $nextPageUrl);
@@ -410,24 +414,26 @@ class Graby
                     break;
                 }
 
-                $extracSuccess = $this->extractor->process(
+                $nextPageExtractedContent = $this->extractor->process(
                     $this->convert2Utf8($response->getResponse()),
                     $nextPageUrl
                 );
 
-                if (!$extracSuccess) {
+                if (!$nextPageExtractedContent->isSuccess) {
                     $this->logger->info('Failed to extract content');
                     $multiPageContent = [];
                     break;
                 }
 
-                $multiPageContent[] = clone $this->extractor->getContent();
+                $multiPageContent[] = clone $nextPageExtractedContent->content;
+                $nextPageUrl = $nextPageExtractedContent->nextPageUrl;
             }
 
             // did we successfully deal with this multi-page article?
             if (empty($multiPageContent)) {
                 $this->logger->info('Failed to extract all parts of multi-page article, so not going to include them');
                 $page = $readability->dom->createElement('p');
+                \assert(false !== $page); // For PHPStan
                 $page->innerHTML = '<em>This article appears to continue on subsequent pages which we could not extract</em>';
                 $multiPageContent[] = $page;
             }
@@ -448,11 +454,11 @@ class Graby
             /* date: */ $extractedDate,
             /* authors: */ $extractedAuthors,
             /* image: */ (string) $extractedImage,
-            /* isNativeAd: */ $this->extractor->isNativeAd()
+            /* isNativeAd: */ $extractedContent->isNativeAd
         );
 
         // if we failed to extract content...
-        if (!$extractResult || null === $contentBlock) {
+        if (!$extractedContent->isSuccess || null === $contentBlock) {
             $this->logger->info('Extract failed');
 
             return $res;
@@ -551,11 +557,11 @@ class Graby
      *
      * @return array{
      *   mime: '',
-     * } | array{
+     * }|array{
      *   mime: string,
      *   type: string,
      *   subtype: string,
-     * } | array{
+     * }|array{
      *   mime: string,
      *   type: string,
      *   subtype: string,
@@ -600,11 +606,11 @@ class Graby
      *
      * @param array{
      *   mime: '',
-     * } | array{
+     * }|array{
      *   mime: string,
      *   type: string,
      *   subtype: string,
-     * } | array{
+     * }|array{
      *   mime: string,
      *   type: string,
      *   subtype: string,
@@ -652,7 +658,7 @@ class Graby
 
             // strip away unwanted chars (that usualy came from PDF extracted content)
             // @see http://www.phpwact.org/php/i18n/charsets#common_problem_areas_with_utf-8
-            $html = preg_replace('/[^\x{0009}\x{000a}\x{000d}\x{0020}-\x{D7FF}\x{E000}-\x{FFFD}]+/u', ' ', $html);
+            $html = preg_replace('/[^\x{0009}\x{000a}\x{000d}\x{0020}-\x{D7FF}\x{E000}-\x{FFFD}]+/u', ' ', (string) $html);
             \assert(null !== $html); // For PHPStan
 
             $infos = $infos->withHtml($html);
@@ -662,7 +668,7 @@ class Graby
 
             // Title can be a string or an array with one key
             if (isset($details['Title'])) {
-                if (\is_array($details['Title']) && isset($details['Title'][0]) && '' !== trim($details['Title'][0])) {
+                if (\is_array($details['Title']) && isset($details['Title'][0]) && '' !== trim((string) $details['Title'][0])) {
                     $infos = $infos->withTitle($details['Title'][0]);
                 } elseif (\is_string($details['Title']) && '' !== trim($details['Title'])) {
                     $infos = $infos->withTitle($details['Title']);
@@ -670,7 +676,7 @@ class Graby
             }
 
             if (isset($details['Author'])) {
-                if (\is_array($details['Author']) && isset($details['Author'][0]) && '' !== trim($details['Author'][0])) {
+                if (\is_array($details['Author']) && isset($details['Author'][0]) && '' !== trim((string) $details['Author'][0])) {
                     $infos = $infos->withAuthors([$details['Author'][0]]);
                 } elseif (\is_string($details['Author']) && '' !== trim($details['Author'])) {
                     $infos = $infos->withAuthors([$details['Author']]);
@@ -678,7 +684,7 @@ class Graby
             }
 
             if (isset($details['CreationDate'])) {
-                if (\is_array($details['CreationDate']) && isset($details['CreationDate'][0]) && '' !== trim($details['CreationDate'][0])) {
+                if (\is_array($details['CreationDate']) && isset($details['CreationDate'][0]) && '' !== trim((string) $details['CreationDate'][0])) {
                     $infos = $infos->withDate($this->extractor->validateDate($details['CreationDate'][0]));
                 } elseif (\is_string($details['CreationDate']) && '' !== trim($details['CreationDate'])) {
                     $infos = $infos->withDate($this->extractor->validateDate($details['CreationDate']));
@@ -717,6 +723,7 @@ class Graby
 
         // Build DOM tree from HTML
         $readability = new Readability($html, (string) $url);
+        $readability->loadHtml();
         $xpath = new \DOMXPath($readability->dom);
 
         // Loop through single_page_link xpath expressions
@@ -792,18 +799,16 @@ class Graby
      */
     private function makeAbsolute(UriInterface $base, \DOMElement $elem): void
     {
-        foreach (['a' => 'href', 'img' => 'src', 'iframe' => 'src'] as $tag => $attr) {
-            $elems = $elem->getElementsByTagName($tag);
+        $tagAttrMap = ['a' => 'href', 'img' => 'src', 'iframe' => 'src'];
 
-            for ($i = $elems->length - 1; $i >= 0; --$i) {
-                $e = $elems->item($i);
-                if (null !== $e) {
-                    $this->makeAbsoluteAttr($base, $e, $attr);
-                }
-            }
+        $nodeName = strtolower($elem->nodeName);
+        if (isset($tagAttrMap[$nodeName])) {
+            $this->makeAbsoluteAttr($base, $elem, $tagAttrMap[$nodeName]);
+        }
 
-            if (strtolower($elem->nodeName) === $tag) {
-                $this->makeAbsoluteAttr($base, $elem, $attr);
+        foreach ($tagAttrMap as $tag => $attr) {
+            foreach ($elem->getElementsByTagName($tag) as $e) {
+                $this->makeAbsoluteAttr($base, $e, $attr);
             }
         }
     }
@@ -831,7 +836,7 @@ class Graby
         if (!preg_match('!^(https?://|#)!i', $url)) {
             try {
                 $absolute = $this->makeAbsoluteStr($base, $url);
-            } catch (\Exception $exception) {
+            } catch (\Exception) {
                 $this->logger->info('Wrong content url', ['url' => (string) $url]);
             }
         }
@@ -1019,7 +1024,7 @@ class Graby
                 'safe' => 1,
                 // *+iframe: do not remove iframe elements
                 'elements' => '*+iframe-meta',
-                'deny_attribute' => 'style',
+                'deny_attribute' => 'style,srcdoc',
                 'comment' => 1,
                 'cdata' => 1,
             ]

@@ -10,8 +10,8 @@ return (new PhpCsFixer\Config())
     ->setRules([
         '@Symfony' => true,
         '@Symfony:risky' => true,
-        '@PHP74Migration' => true,
-        '@PHP74Migration:risky' => true,
+        '@PHP7x4Migration' => true,
+        '@PHP7x4Migration:risky' => true,
         // Breaks spacing around faux named arguments (in a comment).
         'method_argument_space' => false,
         'array_syntax' => ['syntax' => 'short'],
@@ -44,6 +44,9 @@ return (new PhpCsFixer\Config())
         'strict_comparison' => true,
         'strict_param' => true,
         'concat_space' => ['spacing' => 'one'],
+        'multiline_promoted_properties' => [
+            'minimum_number_of_parameters' => 2
+        ],
     ])
     ->setFinder($finder)
 ;

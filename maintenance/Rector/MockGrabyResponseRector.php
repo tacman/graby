@@ -23,40 +23,30 @@ use PhpParser\Node\Expr\Variable;
 use PhpParser\Node\Identifier;
 use PhpParser\Node\Name;
 use PhpParser\Node\Scalar\String_;
+use PhpParser\Node\Stmt\ClassMethod;
+use PhpParser\Node\Stmt\Expression;
 use Psr\Http\Message\ResponseInterface;
-use Rector\Core\Application\FileSystem\RemovedAndAddedFilesCollector;
-use Rector\Core\Rector\AbstractRector;
-use Rector\FileSystemRector\ValueObject\AddedFileWithContent;
 use Rector\Naming\Naming\VariableNaming;
-use Rector\NodeNestingScope\ParentScopeFinder;
 use Rector\NodeTypeResolver\Node\AttributeKey;
-use Rector\PostRector\Collector\UseNodesToAddCollector;
-use Rector\StaticTypeMapper\ValueObject\Type\AliasedObjectType;
+use Rector\PhpParser\Node\BetterNodeFinder;
+use Rector\PhpParser\Node\Value\ValueResolver;
+use Rector\Rector\AbstractRector;
 use Rector\StaticTypeMapper\ValueObject\Type\FullyQualifiedObjectType;
+use Symfony\Component\Filesystem\Path;
 use Symplify\RuleDocGenerator\ValueObject\CodeSample\CodeSample;
 use Symplify\RuleDocGenerator\ValueObject\RuleDefinition;
-use Symplify\SmartFileSystem\SmartFileInfo;
 
 final class MockGrabyResponseRector extends AbstractRector
 {
     private const FIXTURE_DIRECTORY = __DIR__ . '/../../tests/fixtures/content';
     private const MATCHING_ERROR_COMMENT = 'TODO: Rector was unable to evaluate this Graby config.';
     private const IGNORE_COMMENT = 'Rector: do not add mock client';
-    private ParentScopeFinder $parentScopeFinder;
-    private RemovedAndAddedFilesCollector $removedAndAddedFilesCollector;
-    private UseNodesToAddCollector $useNodesToAddCollector;
-    private VariableNaming $variableNaming;
 
     public function __construct(
-        ParentScopeFinder $parentScopeFinder,
-        RemovedAndAddedFilesCollector $removedAndAddedFilesCollector,
-        UseNodesToAddCollector $useNodesToAddCollector,
-        VariableNaming $variableNaming
+        private readonly BetterNodeFinder $betterNodeFinder,
+        private readonly ValueResolver $valueResolver,
+        private readonly VariableNaming $variableNaming
     ) {
-        $this->parentScopeFinder = $parentScopeFinder;
-        $this->removedAndAddedFilesCollector = $removedAndAddedFilesCollector;
-        $this->useNodesToAddCollector = $useNodesToAddCollector;
-        $this->variableNaming = $variableNaming;
     }
 
     public function getRuleDefinition(): RuleDefinition
@@ -86,33 +76,40 @@ final class MockGrabyResponseRector extends AbstractRector
      */
     public function getNodeTypes(): array
     {
-        return [New_::class];
+        // PHPUnit tests are class methods.
+        return [ClassMethod::class];
     }
 
     /**
-     * @param New_ $node
+     * @param ClassMethod $node
      */
     public function refactor(Node $node): ?Node
     {
-        $new = $node;
-        if (!$this->nodeNameResolver->isName($new->class, Graby::class)) {
+        $assigns = $this->betterNodeFinder->find(
+            $node,
+            fn (Node $node): bool => $node instanceof Expression
+                && ($assignment = $node->expr) instanceof Assign
+                && ($new = $assignment->expr) instanceof New_
+                && $this->nodeNameResolver->isName($new->class, Graby::class)
+        );
+
+        if (1 !== \count($assigns)) {
             return null;
         }
 
-        /** @var Node $parentNode */
-        $parentNode = $new->getAttribute(AttributeKey::PARENT_NODE);
-        $assignment = $parentNode;
-        if (!$assignment instanceof Assign) {
-            return null;
-        }
+        $assignStmt = $assigns[0];
+        \assert($assignStmt instanceof Expression);
 
-        $statement = $this->betterNodeFinder->resolveCurrentStatement($new);
-        \assert(null !== $statement, 'Graby construction needs to be inside a statement.');
+        $assignment = $assignStmt->expr;
+        \assert($assignment instanceof Assign);
 
-        $comments = $statement->getAttribute(AttributeKey::COMMENTS);
+        $new = $assignment->expr;
+        \assert($new instanceof New_);
+
+        $comments = $assignStmt->getAttribute(AttributeKey::COMMENTS);
         if (null !== $comments) {
             foreach ($comments as $comment) {
-                if (preg_match('(' . preg_quote(self::MATCHING_ERROR_COMMENT) . '|' . preg_quote(self::IGNORE_COMMENT) . ')', $comment->getText())) {
+                if (preg_match('(' . preg_quote(self::MATCHING_ERROR_COMMENT) . '|' . preg_quote(self::IGNORE_COMMENT) . ')', (string) $comment->getText())) {
                     // Skip already processed or intentionally excluded.
                     return null;
                 }
@@ -129,15 +126,12 @@ final class MockGrabyResponseRector extends AbstractRector
             return null;
         }
 
-        $scope = $this->parentScopeFinder->find($new);
-        if (null === $scope) {
-            return null;
-        }
+        $stmts = (array) $node->stmts;
 
         $fetchUrls = array_map(
             fn (Node $node): ?string => $this->getFetchUrl($grabyVariable, $node),
             $this->betterNodeFinder->find(
-                (array) $scope->stmts,
+                $stmts,
                 fn (Node $foundNode): bool => null !== $this->getFetchUrl($grabyVariable, $foundNode)
             )
         );
@@ -150,17 +144,20 @@ final class MockGrabyResponseRector extends AbstractRector
         $url = (string) $fetchUrls[0];
 
         // Add imports.
-        $this->useNodesToAddCollector->addUseImport(
-            new AliasedObjectType('HttpMockClient', \Http\Mock\Client::class)
-        );
-        $this->useNodesToAddCollector->addUseImport(
+        // `use Http\Mock\Client as HttpMockClient;` needs to be added manually.
+        $fileNode = $this->getFile()->getFileNode();
+        if (null === $fileNode) {
+            return null;
+        }
+
+        $fileNode->getPendingImports()->addUseImport(
             new FullyQualifiedObjectType(\GuzzleHttp\Psr7\Response::class)
         );
 
-        $httpMockClientVariable = $this->createMockClientVariable($new);
+        $httpMockClientVariable = $this->createMockClientVariable($assignment);
         // List of statements to be placed before the Graby construction.
         $mockStatements = [
-            new Assign($httpMockClientVariable, new New_(new Name('HttpMockClient'))),
+            new Expression(new Assign($httpMockClientVariable, new New_(new Name('HttpMockClient')))),
         ];
 
         $config = 0 === \count($new->args) || !($configArg = $new->args[0]) instanceof Arg ? [] : $this->valueResolver->getValue($configArg->value);
@@ -168,7 +165,7 @@ final class MockGrabyResponseRector extends AbstractRector
             // Paste the config here if this failed.
             $config = [];
 
-            $statement->setAttribute(
+            $assignStmt->setAttribute(
                 AttributeKey::COMMENTS,
                 array_merge(
                     $comments ?? [],
@@ -176,7 +173,7 @@ final class MockGrabyResponseRector extends AbstractRector
                 )
             );
 
-            return $new;
+            return $node;
         }
 
         foreach ($this->fetchResponses($url, $config) as $index => $response) {
@@ -184,39 +181,41 @@ final class MockGrabyResponseRector extends AbstractRector
             $fileName = preg_replace('([^a-zA-Z0-9-_\.])', '_', $url) . $suffix;
 
             // Create a fixture.
-            $this->removedAndAddedFilesCollector->addAddedFile(
-                new AddedFileWithContent(
-                    self::FIXTURE_DIRECTORY . '/' . $fileName,
-                    (string) $response->getBody()
-                )
+            file_put_contents(
+                self::FIXTURE_DIRECTORY . '/' . $fileName,
+                (string) $response->getBody()
             );
 
             // Register a mocked response.
-            $mockStatements[] = $this->nodeFactory->createMethodCall(
+            $mockStatements[] = new Expression($this->nodeFactory->createMethodCall(
                 $httpMockClientVariable,
                 'addResponse',
                 [
                     $this->createNewResponseExpression($response, $fileName),
                 ]
-            );
+            ));
         }
-
-        $this->nodesToAddCollector->addNodesBeforeNode($mockStatements, $new);
 
         // Add the mocked client to Graby constructor.
         $new->args[] = new Arg($httpMockClientVariable);
 
-        return $new;
+        $index = array_search($assignStmt, $stmts, true);
+        \assert(false !== $index, 'Assignment statement not direct child of the method');
+        \assert(!\is_string($index)); // For PHPStan.
+
+        array_splice($stmts, $index, 0, $mockStatements);
+        $node->stmts = $stmts;
+
+        return $node;
     }
 
     /**
      * Provides a new variable called $httpMockClient,
      * optionally followed by number if the name is already taken.
      */
-    private function createMockClientVariable(New_ $new): Variable
+    private function createMockClientVariable(Assign $assignment): Variable
     {
-        $currentStmt = $this->betterNodeFinder->resolveCurrentStatement($new);
-        $scope = $currentStmt->getAttribute(AttributeKey::SCOPE);
+        $scope = $assignment->getAttribute(AttributeKey::SCOPE);
         \assert(null !== $scope); // For PHPStan.
 
         return new Variable($this->variableNaming->createCountedValueName('httpMockClient', $scope));
@@ -229,8 +228,7 @@ final class MockGrabyResponseRector extends AbstractRector
      */
     private function createNewResponseExpression(ResponseInterface $response, string $fileName): New_
     {
-        $fixtureDirectory = new SmartFileInfo(self::FIXTURE_DIRECTORY);
-        $relativeFixturePath = $fixtureDirectory->getRelativeFilePathFromDirectory($this->file->getSmartFileInfo()->getRealPathDirectory());
+        $relativeFixturePath = Path::makeRelative(self::FIXTURE_DIRECTORY, \dirname($this->getFile()->getFilePath()));
 
         return new New_(
             new Name('Response'),

@@ -30,14 +30,13 @@ use Psr\Log\NullLogger;
  */
 class HttpClient
 {
-    private HttpClientConfig $config;
-    private HttpMethodsClient $client;
+    private readonly HttpClientConfig $config;
+    private readonly HttpMethodsClient $client;
     private LoggerInterface $logger;
-    private ResponseFactoryInterface $responseFactory;
-    private StreamFactoryInterface $streamFactory;
-    private UriFactoryInterface $uriFactory;
-    private History $responseHistory;
-    private ?ContentExtractor $extractor;
+    private readonly ResponseFactoryInterface $responseFactory;
+    private readonly StreamFactoryInterface $streamFactory;
+    private readonly UriFactoryInterface $uriFactory;
+    private readonly History $responseHistory;
 
     /**
      * @param ClientInterface $client Http client
@@ -52,8 +51,12 @@ class HttpClient
      *   max_redirect?: int,
      * } $config
      */
-    public function __construct(ClientInterface $client, array $config = [], ?LoggerInterface $logger = null, ?ContentExtractor $extractor = null)
-    {
+    public function __construct(
+        ClientInterface $client,
+        array $config = [],
+        ?LoggerInterface $logger = null,
+        private readonly ?ContentExtractor $extractor = null
+    ) {
         $this->config = new HttpClientConfig($config);
 
         if (null === $logger) {
@@ -61,7 +64,6 @@ class HttpClient
         }
 
         $this->logger = $logger;
-        $this->extractor = $extractor;
 
         $this->responseFactory = Psr17FactoryDiscovery::findResponseFactory();
         $this->streamFactory = Psr17FactoryDiscovery::findStreamFactory();
@@ -102,6 +104,9 @@ class HttpClient
      */
     public function fetch(UriInterface $url, bool $skipTypeVerification = false, array $httpHeader = []): EffectiveResponse
     {
+        // if fetch is used directly, force case to avoid bad headers later
+        $httpHeader = array_change_key_case($httpHeader, \CASE_LOWER);
+
         $url = $this->cleanupUrl($url);
 
         $method = 'get';
@@ -129,10 +134,19 @@ class HttpClient
             $headers['Accept'] = $accept;
         }
 
+        foreach ($httpHeader as $header => $value) {
+            // do not override already defined headers
+            if (null === $value || '' === $value || \in_array($header, ['user-agent', 'referer', 'cookie', 'accept'], true)) {
+                continue;
+            }
+
+            $headers[$header] = $value;
+        }
+
         try {
             /** @var ResponseInterface $response */
             $response = $this->client->$method($url, $headers);
-        } catch (LoopException $e) {
+        } catch (LoopException) {
             $this->logger->info('Endless redirect: ' . ($this->config->getMaxRedirect() + 1) . ' on "{url}"', ['url' => (string) $url]);
 
             return new EffectiveResponse(
@@ -362,7 +376,7 @@ class HttpClient
             $this->logger->info('Found cookie "{cookie}" for url "{url}" from site config', ['cookie' => $httpHeader['cookie'], 'url' => (string) $url]);
 
             $cookies = [];
-            $pieces = array_filter(array_map('trim', explode(';', $httpHeader['cookie'])));
+            $pieces = array_filter(array_map(trim(...), explode(';', $httpHeader['cookie'])));
 
             foreach ($pieces as $part) {
                 $cookieParts = explode('=', $part, 2);
@@ -380,7 +394,7 @@ class HttpClient
             }
 
             // see https://tools.ietf.org/html/rfc6265.html#section-4.2.1
-            return implode('; ', array_map(fn ($name) => $name . '=' . $cookies[$name], array_keys($cookies)));
+            return implode('; ', array_map(static fn ($name) => $name . '=' . $cookies[$name], array_keys($cookies)));
         }
 
         return null;
@@ -510,10 +524,10 @@ class HttpClient
         $query = $uri->getQuery();
         if ('' !== $query) {
             $q_array = explode('&', $query);
-            // Remove utm_* parameters
+            // Remove utm_* and mtm_* parameters
             $clean_query = array_filter(
                 $q_array,
-                fn (string $param): bool => !str_starts_with($param, 'utm_')
+                static fn (string $param): bool => !str_starts_with($param, 'utm_') && !str_starts_with($param, 'mtm_')
             );
             $uri = $uri->withQuery(implode('&', $clean_query));
         }

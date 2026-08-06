@@ -13,8 +13,8 @@ use Symfony\Component\OptionsResolver\OptionsResolver;
 class ConfigBuilderConfig
 {
     /** @var array<string> */
-    private array $site_config;
-    private string $hostname_regex;
+    private readonly array $site_config;
+    private readonly string $hostname_regex;
 
     /**
      * @param array{
@@ -36,7 +36,7 @@ class ConfigBuilderConfig
         $resolver->setAllowedTypes('site_config', 'string[]');
         $resolver->setAllowedTypes('hostname_regex', 'string');
 
-        $resolver->setNormalizer('site_config', function (Options $options, $value) {
+        $resolver->setNormalizer('site_config', static function (Options $options, $value) {
             foreach ($value as $key => $path) {
                 $value[$key] = rtrim($path, '/');
             }

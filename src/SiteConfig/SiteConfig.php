@@ -190,7 +190,7 @@ class SiteConfig
     /**
      * Extra fields to POST to the site's login form.
      *
-     * @var array<string, string> hash of form field name => value
+     * @var array<int|string, string> hash of form field name => value
      */
     public array $login_extra_fields = [];
 
@@ -198,6 +198,13 @@ class SiteConfig
      * Explicitly skip getting data from JSON-LD.
      */
     public bool $skip_json_ld = false;
+
+    /**
+     * Strip attributes matching these XPath expressions after content extraction.
+     *
+     * @var string[]
+     */
+    public array $post_strip_attr = [];
 
     /**
      * Wrap elements matching these xpath expressions with the specified tag (associative array).
