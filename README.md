@@ -1,7 +1,3 @@
-composer config repositories.graby '{"type": "path", "url": "~/g/tacman/graby"}'
-composer req tacman/graby:"*@dev"
-
-
 <div align="center">
     <br>
     <img width="400" height="144" src="https://user-images.githubusercontent.com/62333/67490348-5dfc5280-f673-11e9-9b3d-584e6cbeb9e2.png" alt="Graby logo" />
@@ -23,7 +19,34 @@ Graby helps you extract article content from web pages
 - it uses [site_config](http://help.fivefilters.org/customer/portal/articles/223153-site-patterns) to extract content from websites
 - it's a fork of Full-Text RSS v3.3 from [@fivefilters](http://fivefilters.org/)
 
-## Why this fork ?
+## This fork (tacman/graby)
+
+This is [tacman](https://github.com/tacman)'s fork of the upstream `j0k3r/graby` project,
+kept current with PHP 8.5 / Symfony 8 consumers in mind. The `tac` branch is periodically
+merged forward from `upstream/master` (j0k3r/graby) to stay close to upstream while carrying
+a small set of app-specific fixes:
+
+- Depends on [`tacman/php-readability`](https://github.com/tacman/php-readability) instead of
+  `j0k3r/php-readability`, for the same reason (kept-current fork, not a divergent rewrite).
+- `ext-tidy` is treated as fully optional at runtime (`extension_loaded('tidy')` guards the one
+  call site in `ContentExtractor::process()`), not just absent from `composer.json`'s `require`.
+  Graby works identically with or without the extension installed; Tidy just improves extraction
+  quality on malformed HTML when it's present.
+
+To use this fork in a consuming app (e.g. a Symfony 8 project), point `composer.json` at the
+`tac` branch directly — no `repositories` block needed, Composer resolves it straight from
+Packagist:
+
+```bash
+composer require tacman/graby:dev-tac
+```
+
+If your app's `composer.json` also lists `j0k3r/graby` (directly or transitively), replace that
+line with `"tacman/graby": "dev-tac"` — see
+[`tacman/f43.me`](https://github.com/tacman/f43.me)'s `composer.json` for a real example, and
+`tacman/php-readability`'s own README for the matching swap on that dependency.
+
+## Why this fork (upstream's original rationale)?
 
 Full-Text RSS works great as a standalone application. But when you need to encapsulate it in your own library it's a mess. You need this kind of ugly thing:
 
@@ -50,13 +73,17 @@ That's why I made this fork:
 ### Requirements
 
 - PHP >= 8.2
-- [Tidy](https://github.com/htacg/tidy-html5) & cURL extensions enabled
+- cURL extension enabled
+- [Tidy](https://github.com/htacg/tidy-html5) extension — optional; improves extraction quality
+  on malformed HTML when present, but Graby runs fine without it
 
 ### Installation
 
-Add the lib using [Composer](https://getcomposer.org/):
+Add the lib using [Composer](https://getcomposer.org/) — on this fork, from the `tac` branch:
 
-    composer require 'j0k3r/graby dev-master' php-http/guzzle7-adapter
+    composer require tacman/graby:dev-tac php-http/guzzle7-adapter
+
+(upstream's own install command, for reference: `composer require 'j0k3r/graby dev-master' php-http/guzzle7-adapter`)
 
 Why `php-http/guzzle7-adapter`? Because Graby is decoupled from any HTTP client implementation, thanks to [HTTPlug](http://httplug.io/) (see [that list of client implementation](https://packagist.org/providers/php-http/client-implementation)).
 
