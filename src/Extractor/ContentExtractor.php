@@ -157,7 +157,7 @@ class ContentExtractor
 
         $this->logger->info('Attempting to parse HTML with {parser}', ['parser' => $parser]);
 
-        $this->readability = $this->getReadability($html, $url, $parser, $this->siteConfig->tidy() && $smartTidy);
+        $this->readability = $this->getReadability($html, $url, $parser, \extension_loaded('tidy') && $this->siteConfig->tidy() && $smartTidy);
         $tidied = $this->readability->tidied;
 
         $this->logger->info('Body size after Readability: {length}', ['length' => \strlen((string) $this->readability->dom->saveXML($this->readability->dom->documentElement))]);
