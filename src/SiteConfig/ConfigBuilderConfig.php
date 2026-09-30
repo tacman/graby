@@ -10,33 +10,26 @@ use Symfony\Component\OptionsResolver\OptionsResolver;
 /**
  * Configuration for ConfigBuilder as a Value Object.
  */
-class ConfigBuilderConfig
+readonly class ConfigBuilderConfig
 {
-    /** @var array<string> */
-    private readonly array $site_config;
-    private readonly string $hostname_regex;
+    /** @var string[] Directory paths of site config folders WITHOUT trailing slash */
+    public array $siteConfig;
 
     /**
-     * @param array{
-     *   site_config?: string[],
-     *   hostname_regex?: string,
-     * } $config
+     * @param string[] $siteConfig
      */
-    public function __construct(array $config)
-    {
+    public function __construct(
+        array $siteConfig = [],
+        public string $hostnameRegex = '/^(([a-zA-Z0-9-]*[a-zA-Z0-9])\.)*([A-Za-z0-9-]*[A-Za-z0-9])$/',
+    ) {
         $resolver = new OptionsResolver();
-        $resolver->setDefaults([
-            // Directory path to the site config folder WITHOUT trailing slash
-            'site_config' => [],
-            'hostname_regex' => '/^(([a-zA-Z0-9-]*[a-zA-Z0-9])\.)*([A-Za-z0-9-]*[A-Za-z0-9])$/',
+        $resolver->setDefined([
+            'siteConfig',
         ]);
 
-        $resolver->setRequired('site_config');
+        $resolver->setAllowedTypes('siteConfig', 'string[]');
 
-        $resolver->setAllowedTypes('site_config', 'string[]');
-        $resolver->setAllowedTypes('hostname_regex', 'string');
-
-        $resolver->setNormalizer('site_config', static function (Options $options, $value) {
+        $resolver->setNormalizer('siteConfig', static function (Options $options, $value) {
             foreach ($value as $key => $path) {
                 $value[$key] = rtrim($path, '/');
             }
@@ -44,23 +37,10 @@ class ConfigBuilderConfig
             return $value;
         });
 
-        $config = $resolver->resolve($config);
+        $config = $resolver->resolve([
+            'siteConfig' => $siteConfig,
+        ]);
 
-        foreach ($config as $key => $value) {
-            $this->$key = $value;
-        }
-    }
-
-    /**
-     * @return array<string>
-     */
-    public function getSiteConfig(): array
-    {
-        return $this->site_config;
-    }
-
-    public function getHostnameRegex(): string
-    {
-        return $this->hostname_regex;
+        $this->siteConfig = $config['siteConfig'];
     }
 }

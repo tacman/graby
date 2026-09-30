@@ -106,50 +106,57 @@ $article = 'http://www.bbc.com/news/entertainment-arts-32547474';
 $graby = new Graby();
 $result = $graby->fetchContent($article);
 
-var_dump($result->getResponse()->getStatus()); // 200
-var_dump($result->getHtml()); // "[Fetched and readable content…]"
-var_dump($result->getTitle()); // "Ben E King: R&B legend dies at 76"
-var_dump($result->getLanguage()); // "en-GB"
-var_dump($result->getDate()); // "2015-05-01T16:24:37+01:00"
-var_dump($result->getAuthors()); // ["BBC News"]
-var_dump((string) $result->getResponse()->getEffectiveUri()); // "http://www.bbc.com/news/entertainment-arts-32547474"
-var_dump($result->getImage()); // "https://ichef-1.bbci.co.uk/news/720/media/images/82709000/jpg/_82709878_146366806.jpg"
-var_dump($result->getSummary()); // "Ben E King received an award from the Songwriters Hall of Fame in &hellip;"
-var_dump($result->getIsNativeAd()); // false
-var_dump($result->getResponse()->getHeaders()); /*
-[
-  'server' => ['Apache'],
-  'content-type' => ['text/html; charset=utf-8'],
-  'x-news-data-centre' => ['cwwtf'],
-  'content-language' => ['en'],
-  'x-pal-host' => ['pal074.back.live.cwwtf.local:80'],
-  'x-news-cache-id' => ['13648'],
-  'content-length' => ['157341'],
-  'date' => ['Sat, 29 Apr 2017 07:35:39 GMT'],
-  'connection' => ['keep-alive'],
-  'cache-control' => ['private, max-age=60, stale-while-revalidate'],
-  'x-cache-action' => ['MISS'],
-  'x-cache-age' => ['0'],
-  'x-lb-nocache' => ['true'],
-  'vary' => ['X-CDN,X-BBC-Edge-Cache,Accept-Encoding'],
-]
-*/
+assert(200 === $result->getEffectiveResponse()->getResponse()->getStatusCode());
+assert('[Fetched and readable content…]' === $result->getHtml());
+assert('Ben E King: R&B legend dies at 76' === $result->getTitle());
+assert('en-GB' === $result->getLanguage());
+assert('2015-05-01T16:24:37+01:00' === $result->getDate());
+assert($result->getAuthors() === ['BBC News']);
+assert('http://www.bbc.com/news/entertainment-arts-32547474' === (string) $result->getEffectiveResponse()->getEffectiveUri());
+assert('https://ichef-1.bbci.co.uk/news/720/media/images/82709000/jpg/_82709878_146366806.jpg' === $result->getImage());
+assert('Ben E King received an award from the Songwriters Hall of Fame in &hellip;' === $result->getSummary());
+assert(false === $result->getIsNativeAd());
+assert(
+    $result->getEffectiveResponse()->getResponse()->getHeaders() === [
+        'server' => ['Apache'],
+        'content-type' => ['text/html; charset=utf-8'],
+        'x-news-data-centre' => ['cwwtf'],
+        'content-language' => ['en'],
+        'x-pal-host' => ['pal074.back.live.cwwtf.local:80'],
+        'x-news-cache-id' => ['13648'],
+        'content-length' => ['157341'],
+        'date' => ['Sat, 29 Apr 2017 07:35:39 GMT'],
+        'connection' => ['keep-alive'],
+        'cache-control' => ['private, max-age=60, stale-while-revalidate'],
+        'x-cache-action' => ['MISS'],
+        'x-cache-age' => ['0'],
+        'x-lb-nocache' => ['true'],
+        'vary' => ['X-CDN,X-BBC-Edge-Cache,Accept-Encoding'],
+    ]
+);
 ```
 
 In case of error when fetching the url, graby won't throw an exception but will return information about the error (at least the status code):
 
 ```php
-var_dump($result->getResponse()->getStatus()); // 200
-var_dump($result->getHtml()); // "[unable to retrieve full-text content]"
-var_dump($result->getTitle()); // "BBC - 404: Not Found"
-var_dump($result->getLanguage()); // "en-GB"
-var_dump($result->getDate()); // null
-var_dump($result->getAuthors()); // []
-var_dump((string) $result->getResponse()->getEffectiveUri()); // "http://www.bbc.co.uk/404"
-var_dump($result->getImage()); // null
-var_dump($result->getSummary()); // "[unable to retrieve full-text content]"
-var_dump($result->getIsNativeAd()); // false
-var_dump($result->getResponse()->getHeaders()); // […]
+use Graby\Graby;
+
+$article = 'http://www.bbc.com/news/404';
+
+$graby = new Graby();
+$result = $graby->fetchContent($article);
+
+assert($result->getEffectiveResponse()->getResponse()->getStatusCode() === 200);
+assert($result->getHtml() === "[unable to retrieve full-text content]");
+assert($result->getTitle() === "BBC - 404: Not Found");
+assert($result->getLanguage() === "en-GB");
+assert($result->getDate() === null);
+assert($result->getAuthors() === []);
+assert((string) $result->getEffectiveResponse()->getEffectiveUri() === "http://www.bbc.co.uk/404");
+assert($result->getImage() === null);
+assert($result->getSummary() === "[unable to retrieve full-text content]");
+assert($result->getIsNativeAd() === false);
+assert($result->getEffectiveResponse()->getResponse()->getHeaders() === [/* … */]);
 ```
 
 The `date` result is the same as displayed in the content. If `date` is not `null` in the result, we recommend you to parse it using [`date_parse`](http://php.net/date_parse) (this is what we are using to validate that the date is correct).
@@ -176,10 +183,11 @@ Since the 1.9.0 version, you can also send html content to be cleanup in the sam
 
 ```php
 use Graby\Graby;
+use GuzzleHttp\Psr7\Uri;
 
-$article = 'http://www.bbc.com/news/entertainment-arts-32547474';
+$article = new Uri('http://www.bbc.com/news/entertainment-arts-32547474');
 // use your own way to retrieve html or to provide html
-$html = ...
+$html = '<html>[...]</html>';
 
 $graby = new Graby();
 $result = $graby->cleanupHtml($html, $article);
@@ -214,7 +222,7 @@ monolog:
 
 You can then retrieve logs from graby in your controller using:
 
-```php
+```php no-extract
 $logs = $this->get('monolog.handler.graby')->getRecords();
 ```
 
@@ -233,7 +241,7 @@ configure it and inject it to `Graby\Graby`.
     $guzzle = new GuzzleClient([
         'timeout' => 2,
     ]);
-    $graby = new Graby([], new GuzzleAdapter($guzzle));
+    $graby = new Graby(client: new GuzzleAdapter($guzzle));
     ```
 
 
@@ -242,68 +250,78 @@ configure it and inject it to `Graby\Graby`.
 This is the full documented configuration and also the default one.
 
 ```php
-$graby = new Graby([
+use Graby\Config\ContentLinks;
+use Graby\Config\ContentTypeAction;
+use Graby\Config\LogLevel;
+use Graby\Extractor\ContentExtractorConfig;
+use Graby\Extractor\HttpClientConfig;
+use Graby\Extractor\ReadabilityConfig;
+use Graby\Graby;
+use Graby\GrabyConfig;
+use Graby\SiteConfig\ConfigBuilderConfig;
+
+$graby = new Graby(new GrabyConfig(
     // Enable or disable debugging.
     // This will only generate log information in a file (log/graby.log)
-    'debug' => false,
-    // use 'debug' value if you want more data (HTML at each step for example) to be dumped in a different file (log/html.log)
-    'log_level' => 'info',
+    debug: false,
+    // use LogLevel::Debug value if you want more data (HTML at each step for example) to be dumped in a different file (log/html.log)
+    logLevel: LogLevel::Info,
     // If enabled relative URLs found in the extracted content are automatically rewritten as absolute URLs.
-    'rewrite_relative_urls' => true,
+    rewriteRelativeUrls: true,
     // If enabled, we will try to follow single page links (e.g. print view) on multi-page articles.
     // Currently this only happens for sites where single_page_link has been defined
     // in a site config file.
-    'singlepage' => true,
+    singlepage: true,
     // If enabled, we will try to follow next page links on multi-page articles.
     // Currently this only happens for sites where next_page_link has been defined
     // in a site config file.
-    'multipage' => true,
+    multipage: true,
     // Error message when content extraction fails
-    'error_message' => '[unable to retrieve full-text content]',
+    errorMessage: '[unable to retrieve full-text content]',
     // Default title when we won't be able to extract a title
-    'error_message_title' => 'No title found',
+    errorMessageTitle: 'No title found',
     // List of URLs (or parts of a URL) which will be accept.
     // If the list is empty, all URLs (except those specified in the blocked list below)
     // will be permitted.
     // Example: array('example.com', 'anothersite.org');
-    'allowed_urls' => [],
+    allowedUrls: [],
     // List of URLs (or parts of a URL) which will be not accept.
     // Note: this list is ignored if allowed_urls is not empty
-    'blocked_urls' => [],
+    blockedUrls: [],
     // If enabled, we'll pass retrieved HTML content through htmLawed with
     // safe flag on and style attributes denied, see
     // http://www.bioinformatics.org/phplabware/internal_utilities/htmLawed/htmLawed_README.htm#s3.6
     // Note: if enabled this will also remove certain elements you may want to preserve, such as iframes.
-    'xss_filter' => true,
+    xssFilter: true,
     // Here you can define different actions based on the Content-Type header returned by server.
     // MIME type as key, action as value.
     // Valid actions:
-    // * 'exclude' - exclude this item from the result
-    // * 'link' - create HTML link to the item
-    'content_type_exc' => [
-       'application/zip' => ['action' => 'link', 'name' => 'ZIP'],
-       'application/pdf' => ['action' => 'link', 'name' => 'PDF'],
-       'image' => ['action' => 'link', 'name' => 'Image'],
-       'audio' => ['action' => 'link', 'name' => 'Audio'],
-       'video' => ['action' => 'link', 'name' => 'Video'],
-       'text/plain' => ['action' => 'link', 'name' => 'Plain text'],
+    // * ContentTypeAction::Exclude - exclude this item from the result
+    // * ContentTypeAction::Link - create HTML link to the item
+    contentTypeExc: [
+       'application/zip' => ['action' => ContentTypeAction::Link, 'name' => 'ZIP'],
+       'application/pdf' => ['action' => ContentTypeAction::Link, 'name' => 'PDF'],
+       'image' => ['action' => ContentTypeAction::Link, 'name' => 'Image'],
+       'audio' => ['action' => ContentTypeAction::Link, 'name' => 'Audio'],
+       'video' => ['action' => ContentTypeAction::Link, 'name' => 'Video'],
+       'text/plain' => ['action' => ContentTypeAction::Link, 'name' => 'Plain text'],
     ],
     // How we handle link in content
     // Valid values :
-    // * preserve: nothing is done
-    // * footnotes: convert links as footnotes
-    // * remove: remove all links
-    'content_links' => 'preserve',
-    'http_client' => [
+    // * ContentLinks::Preserve: nothing is done
+    // * ContentLinks::Footnotes: convert links as footnotes
+    // * ContentLinks::Remove: remove all links
+    contentLinks: ContentLinks::Preserve,
+    httpClient: new HttpClientConfig(
         // User-Agent used to fetch content
-        'ua_browser' => 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/535.2 (KHTML, like Gecko) Chrome/15.0.874.92 Safari/535.2',
+        uaBrowser: 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/535.2 (KHTML, like Gecko) Chrome/15.0.874.92 Safari/535.2',
         // default referer when fetching content
-        'default_referer' => 'http://www.google.co.uk/url?sa=t&source=web&cd=1',
+        defaultReferer: 'http://www.google.co.uk/url?sa=t&source=web&cd=1',
         // Currently allows simple string replace of URLs.
         // Useful for rewriting certain URLs to point to a single page or HTML view.
         // Although using the single_page_link site config instruction is the preferred way to do this, sometimes, as
         // with Google Docs URLs, it's not possible.
-        'rewrite_url' => [
+        rewriteUrl: [
             'docs.google.com' => ['/Doc?' => '/View?'],
             'tnr.com' => ['tnr.com/article/' => 'tnr.com/print/article/'],
             '.m.wikipedia.org' => ['.m.wikipedia.org' => '.wikipedia.org'],
@@ -312,7 +330,7 @@ $graby = new Graby([
         // Prevent certain file/mime types
         // HTTP responses which match these content types will
         // be returned without body.
-        'header_only_types' => [
+        headerOnlyTypes: [
            'image',
            'audio',
            'video',
@@ -320,42 +338,42 @@ $graby = new Graby([
         // URLs ending with one of these extensions will
         // prompt Humble HTTP Agent to send a HEAD request first
         // to see if returned content type matches $headerOnlyTypes.
-        'header_only_clues' => ['mp3', 'zip', 'exe', 'gif', 'gzip', 'gz', 'jpeg', 'jpg', 'mpg', 'mpeg', 'png', 'ppt', 'mov'],
+        headerOnlyClues: ['mp3', 'zip', 'exe', 'gif', 'gzip', 'gz', 'jpeg', 'jpg', 'mpg', 'mpeg', 'png', 'ppt', 'mov'],
         // User Agent strings - mapping domain names
-        'user_agents' => [],
+        userAgents: [],
         // AJAX triggers to search for.
         // for AJAX sites, e.g. Blogger with its dynamic views templates.
-        'ajax_triggers' => [
+        ajaxTriggers: [
             "<meta name='fragment' content='!'",
             '<meta name="fragment" content="!"',
             "<meta content='!' name='fragment'",
             '<meta content="!" name="fragment"',
         ],
         // number of redirection allowed until we assume request won't be complete
-        'max_redirect' => 10,
-    ],
-    'extractor' => [
-        'default_parser' => 'libxml',
+        maxRedirect: 10,
+    ),
+    extractor: new ContentExtractorConfig(
+        defaultParser: \Graby\Extractor\Parser::Libxml,
         // key is fingerprint (fragment to find in HTML)
         // value is host name to use for site config lookup if fingerprint matches
         // \s* match anything INCLUDING new lines
-        'fingerprints' => [
+        fingerprints: [
             '/\<meta\s*content=([\'"])blogger([\'"])\s*name=([\'"])generator([\'"])/i' => 'fingerprint.blogspot.com',
             '/\<meta\s*name=([\'"])generator([\'"])\s*content=([\'"])Blogger([\'"])/i' => 'fingerprint.blogspot.com',
             '/\<meta\s*name=([\'"])generator([\'"])\s*content=([\'"])WordPress/i' => 'fingerprint.wordpress.com',
         ],
-        'config_builder' => [
+        configBuilder: new ConfigBuilderConfig(
             // Directory path to the site config folder WITHOUT trailing slash
-            'site_config' => [],
-            'hostname_regex' => '/^(([a-zA-Z0-9-]*[a-zA-Z0-9])\.)*([A-Za-z0-9-]*[A-Za-z0-9])$/',
-        ],
-        'readability' => [
+            siteConfig: [],
+            hostnameRegex: '/^(([a-zA-Z0-9-]*[a-zA-Z0-9])\.)*([A-Za-z0-9-]*[A-Za-z0-9])$/',
+        ),
+        readability: new ReadabilityConfig(
             // filters might be like array('regex' => 'replace with')
             // for example, to remove script content: array('!<script[^>]*>(.*?)</script>!is' => '')
-            'pre_filters' => [],
-            'post_filters' => [],
-        ],
-        'src_lazy_load_attributes' => [
+            preFilters: [],
+            postFilters: [],
+        ),
+        srcLazyLoadAttributes: [
             'data-src',
             'data-lazy-src',
             'data-original',
@@ -363,9 +381,9 @@ $graby = new Graby([
             'data-hi-res-src',
         ],
         // these JSON-LD types will be ignored
-        'json_ld_ignore_types' => ['Organization', 'WebSite', 'Person', 'VideoGame'],
-    ],
-]);
+        jsonLdIgnoreTypes: ['Organization', 'WebSite', 'Person', 'VideoGame'],
+    ),
+));
 ```
 
 ## Credits

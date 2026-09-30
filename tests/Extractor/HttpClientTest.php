@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Graby\Extractor;
 
 use Graby\Extractor\HttpClient;
+use Graby\Extractor\HttpClientConfig;
 use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Psr7\Uri;
 use Http\Mock\Client as HttpMockClient;
@@ -44,7 +45,7 @@ class HttpClientTest extends TestCase
         $httpMockClient = new HttpMockClient();
         $httpMockClient->addResponse(new Response(200, [], 'yay'));
 
-        $http = new HttpClient($httpMockClient, ['user_agents' => ['.wikipedia.org' => 'Mozilla/5.2']]);
+        $http = new HttpClient($httpMockClient, new HttpClientConfig(userAgents: ['.wikipedia.org' => 'Mozilla/5.2']));
         $res = $http->fetch(new Uri($url));
 
         $this->assertSame($urlEffective, (string) $res->getEffectiveUri());
@@ -59,7 +60,7 @@ class HttpClientTest extends TestCase
         $httpMockClient = new HttpMockClient();
         $httpMockClient->addResponse(new Response(200, ['Content-Type' => 'image/jpg'], 'yay'));
 
-        $http = new HttpClient($httpMockClient, ['user_agents' => ['.wikipedia.org' => 'Mozilla/5.2']]);
+        $http = new HttpClient($httpMockClient, new HttpClientConfig(userAgents: ['.wikipedia.org' => 'Mozilla/5.2']));
         $res = $http->fetch(new Uri($url));
 
         $this->assertCount(1, $httpMockClient->getRequests());
@@ -82,7 +83,7 @@ class HttpClientTest extends TestCase
         $httpMockClient->addResponse(new Response(200, ['Content-Type' => 'text/html'], 'yay'));
         $httpMockClient->addResponse(new Response(200, ['Content-Type' => 'text/html'], 'yay'));
 
-        $http = new HttpClient($httpMockClient, ['user_agents' => ['.wikipedia.org' => 'Mozilla/5.2']]);
+        $http = new HttpClient($httpMockClient, new HttpClientConfig(userAgents: ['.wikipedia.org' => 'Mozilla/5.2']));
         $res = $http->fetch(new Uri($url));
 
         $this->assertCount(2, $httpMockClient->getRequests());
@@ -103,7 +104,7 @@ class HttpClientTest extends TestCase
         $httpMockClient->addResponse(new Response(200, ['Content-Type' => 'fucked'], 'yay'));
         $httpMockClient->addResponse(new Response(200, ['Content-Type' => 'fucked'], 'yay'));
 
-        $http = new HttpClient($httpMockClient, ['user_agents' => ['.wikipedia.org' => 'Mozilla/5.2']]);
+        $http = new HttpClient($httpMockClient, new HttpClientConfig(userAgents: ['.wikipedia.org' => 'Mozilla/5.2']));
         $res = $http->fetch(new Uri($url));
 
         $this->assertCount(2, $httpMockClient->getRequests());
@@ -232,7 +233,7 @@ class HttpClientTest extends TestCase
         $handler = new TestHandler();
         $logger->pushHandler($handler);
 
-        $http = new HttpClient($httpMockClient, ['user_agents' => ['.wikipedia.org' => 'Mozilla/5.2']]);
+        $http = new HttpClient($httpMockClient, new HttpClientConfig(userAgents: ['.wikipedia.org' => 'Mozilla/5.2']));
         $http->setLogger($logger);
 
         $res = $http->fetch(new Uri('http://fr.m.wikipedia.org/wiki/Copyright#bottom'));
@@ -244,17 +245,17 @@ class HttpClientTest extends TestCase
         $records = $handler->getRecords();
 
         $this->assertCount(4, $records);
-        $this->assertSame('Trying using method "{method}" on url "{url}"', $records[0]['message']);
-        $this->assertSame('get', $records[0]['context']['method']);
-        $this->assertSame('http://fr.wikipedia.org/wiki/Copyright', $records[0]['context']['url']);
-        $this->assertSame('Use default referer "{referer}" for url "{url}"', $records[2]['message']);
-        $this->assertSame('Data fetched: {data}', $records[3]['message']);
+        $this->assertSame('Trying using method "{method}" on url "{url}"', $records[0]->message);
+        $this->assertSame('get', $records[0]->context['method']);
+        $this->assertSame('http://fr.wikipedia.org/wiki/Copyright', $records[0]->context['url']);
+        $this->assertSame('Use default referer "{referer}" for url "{url}"', $records[2]->message);
+        $this->assertSame('Data fetched: {data}', $records[3]->message);
         $this->assertSame([
             'effective_url' => 'http://fr.wikipedia.org/wiki/Copyright',
             'body' => '(only length for debug): 3',
             'headers' => [],
             'status' => 200,
-        ], $records[3]['context']['data']);
+        ], $records[3]->context['data']);
     }
 
     public function testTimeout(): void
@@ -285,7 +286,7 @@ class HttpClientTest extends TestCase
             $this->markTestSkipped('No Guzzle adapter defined ?');
         }
 
-        $http = new HttpClient($adapter, [], $logger);
+        $http = new HttpClient($adapter, new HttpClientConfig(), $logger);
 
         $res = $http->fetch(new Uri('http://blackhole.webpagetest.org/'));
 
@@ -294,13 +295,13 @@ class HttpClientTest extends TestCase
 
         $records = $handler->getRecords();
 
-        $this->assertSame('Request throw exception (with no response): {error_message}', $records[3]['message']);
+        $this->assertSame('Request throw exception (with no response): {error_message}', $records[3]->message);
         // cURL error 28 is: CURLE_OPERATION_TIMEDOUT
         // "cURL error 28: Connection timed out after"
         if ($isGuzzle) {
-            $this->assertStringContainsString('cURL error 28', $records[3]['context']['error_message']);
+            $this->assertStringContainsString('cURL error 28', $records[3]->context['error_message']);
         } else {
-            $this->assertStringContainsString('Connection timed out after', $records[3]['context']['error_message']);
+            $this->assertStringContainsString('Connection timed out after', $records[3]->context['error_message']);
         }
     }
 
@@ -323,14 +324,14 @@ class HttpClientTest extends TestCase
         $handler = new TestHandler();
         $logger->pushHandler($handler);
 
-        $http = new HttpClient($httpMockClient, ['max_redirect' => 3]);
+        $http = new HttpClient($httpMockClient, new HttpClientConfig(maxRedirect: 3));
         $http->setLogger($logger);
 
         $res = $http->fetch(new Uri('http://fr.wikipedia.org/wiki/Copyright'));
 
         $this->assertSame('http://fr.wikipedia.org/wiki/Copyright', (string) $res->getEffectiveUri());
         $this->assertSame(310, $res->getResponse()->getStatusCode());
-        $this->assertSame('Endless redirect: 4 on "{url}"', $handler->getRecords()[3]['message']);
+        $this->assertSame('Endless redirect: 4 on "{url}"', $handler->getRecords()[3]->message);
     }
 
     /**
@@ -457,20 +458,23 @@ class HttpClientTest extends TestCase
         $handler = new TestHandler();
         $logger->pushHandler($handler);
 
-        $http = new HttpClient($httpMockClient, [
-            'ua_browser' => 'UA/Default',
-            'user_agents' => [
-                'example.com' => 'UA/Config',
-            ],
-        ]);
+        $http = new HttpClient(
+            $httpMockClient,
+            new HttpClientConfig(
+                uaBrowser: 'UA/Default',
+                userAgents: [
+                    'example.com' => 'UA/Config',
+                ],
+            ),
+        );
         $http->setLogger($logger);
 
         $http->fetch(new Uri($url), false, $httpHeader);
 
         $records = $handler->getRecords();
 
-        $this->assertSame($expectedUa, $records[1]['context']['user-agent']);
-        $this->assertSame($url, $records[1]['context']['url']);
+        $this->assertSame($expectedUa, $records[1]->context['user-agent']);
+        $this->assertSame($url, $records[1]->context['url']);
     }
 
     /**
@@ -516,17 +520,17 @@ class HttpClientTest extends TestCase
         $handler = new TestHandler();
         $logger->pushHandler($handler);
 
-        $http = new HttpClient($httpMockClient, [
-            'default_referer' => 'http://defaultreferer.local',
-        ]);
+        $http = new HttpClient($httpMockClient, new HttpClientConfig(
+            defaultReferer: 'http://defaultreferer.local',
+        ));
         $http->setLogger($logger);
 
         $http->fetch(new Uri($url), false, $httpHeader);
 
         $records = $handler->getRecords();
 
-        $this->assertSame($expectedReferer, $records[2]['context']['referer']);
-        $this->assertSame($url, $records[2]['context']['url']);
+        $this->assertSame($expectedReferer, $records[2]->context['referer']);
+        $this->assertSame($url, $records[2]->context['url']);
     }
 
     /**
@@ -581,10 +585,10 @@ class HttpClientTest extends TestCase
 
         // if cookie is enable, a log will be available, otherwise not
         if (null !== $expectedCookie) {
-            $this->assertSame($expectedCookie, $records[3]['context']['cookie']);
-            $this->assertSame($url, $records[3]['context']['url']);
+            $this->assertSame($expectedCookie, $records[3]->context['cookie']);
+            $this->assertSame($url, $records[3]->context['url']);
         } else {
-            $this->assertArrayNotHasKey('cookie', $records[3]['context']);
+            $this->assertArrayNotHasKey('cookie', $records[3]->context);
         }
     }
 
@@ -641,10 +645,10 @@ class HttpClientTest extends TestCase
 
         // if accept is enable, a log will be available, otherwise not
         if ($expectedAccept) {
-            $this->assertSame($expectedAccept, $records[3]['context']['accept']);
-            $this->assertSame($url, $records[3]['context']['url']);
+            $this->assertSame($expectedAccept, $records[3]->context['accept']);
+            $this->assertSame($url, $records[3]->context['url']);
         } else {
-            $this->assertArrayNotHasKey('accept', $records[3]['context']);
+            $this->assertArrayNotHasKey('accept', $records[3]->context);
         }
     }
 

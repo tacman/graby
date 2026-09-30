@@ -11,7 +11,6 @@ use Psr\Log\NullLogger;
 
 class ConfigBuilder
 {
-    private readonly ConfigBuilderConfig $config;
     /** @var array<string, string> */
     private array $configFiles = [];
     /** @var array<string, SiteConfig> */
@@ -26,18 +25,10 @@ class ConfigBuilder
         'div',
     ];
 
-    /**
-     * @param array{
-     *   site_config?: string[],
-     *   hostname_regex?: string,
-     * } $config
-     */
     public function __construct(
-        array $config = [],
+        private readonly ConfigBuilderConfig $config = new ConfigBuilderConfig(),
         private ?LoggerInterface $logger = new NullLogger(),
     ) {
-        $this->config = new ConfigBuilderConfig($config);
-
         $this->loadConfigFiles();
     }
 
@@ -55,7 +46,7 @@ class ConfigBuilder
      */
     public function loadConfigFiles(): void
     {
-        $this->configFiles = Files::getFiles($this->config->getSiteConfig());
+        $this->configFiles = Files::getFiles($this->config->siteConfig);
     }
 
     /**
@@ -171,7 +162,7 @@ class ConfigBuilder
     {
         $host = $this->makeHostKey($host);
 
-        if (!$host || (\strlen($host) > 200) || !preg_match($this->config->getHostnameRegex(), ltrim($host, '.'))) {
+        if (!$host || (\strlen($host) > 200) || !preg_match($this->config->hostnameRegex, ltrim($host, '.'))) {
             return null;
         }
 

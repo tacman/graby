@@ -1,12 +1,10 @@
-includes:
-    - maintenance/phpstan-ignore-by-php-version.php
-
 parameters:
     level: 7
     paths:
         - maintenance/Rector
         - src
         - tests
+        - .extracted-code-examples
 
     bootstrapFiles:
         - vendor/bin/.phpunit/phpunit/vendor/autoload.php
@@ -23,17 +21,6 @@ parameters:
         -
             message: '#\$innerHTML#'
             path: %currentWorkingDirectory%
-        -
-            identifier: property.uninitializedReadonly
-        -
-            identifier: offsetAccess.nonOffsetAccessible
-            path: %currentWorkingDirectory%/tests
-            count: 13
-        -
-            identifier: argument.type
-            paths:
-                - %currentWorkingDirectory%/tests/Extractor/HttpClientTest.php
-                - %currentWorkingDirectory%/tests/SiteConfig/ConfigBuilderTest.php
 
     inferPrivatePropertyTypeFromConstructor: true
     treatPhpDocTypesAsCertain: false
